@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IoT Stick - Account Management</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+    <div class="container">
+        <div class="row justify-content-center mt-5">
+            <div class="col-md-6 col-lg-4">
+                <div class="card shadow">
+                    <div class="card-body p-4">
+                        <h2 class="text-center mb-4">Account Management</h2>
+                        
+                        <div class="mb-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="accountAction" id="createAccount" value="create" checked>
+                                <label class="form-check-label" for="createAccount">
+                                    Create New Account
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="accountAction" id="changePassword" value="change">
+                                <label class="form-check-label" for="changePassword">
+                                    Change Password
+                                </label>
+                            </div>
+                        </div>
+
+                        <form id="accountForm">
+                            <!-- Create Account Fields -->
+                            <div id="createAccountFields">
+                                <div class="mb-3">
+                                    <label for="newUsername" class="form-label">New Username</label>
+                                    <input type="text" class="form-control" id="newUsername">
+                                </div>
+                                <div class="mb-3">
+                                    <label for="newPassword" class="form-label">New Password</label>
+                                    <input type="password" class="form-control" id="newPassword">
+                                </div>
+                                <div class="mb-3">
+                                    <label for="confirmPassword" class="form-label">Confirm Password</label>
+                                    <input type="password" class="form-control" id="confirmPassword">
+                                </div>
+                            </div>
+
+                            <!-- Change Password Fields -->
+                            <div id="changePasswordFields" style="display: none;">
+                                <div class="mb-3">
+                                    <label for="existingUsername" class="form-label">Username</label>
+                                    <input type="text" class="form-control" id="existingUsername">
+                                </div>
+                                <div class="mb-3">
+                                    <label for="currentPassword" class="form-label">Current Password</label>
+                                    <input type="password" class="form-control" id="currentPassword">
+                                </div>
+                                <div class="mb-3">
+                                    <label for="newPasswordChange" class="form-label">New Password</label>
+                                    <input type="password" class="form-control" id="newPasswordChange">
+                                </div>
+                            </div>
+
+                            <div class="d-grid">
+                                <button type="submit" class="btn btn-primary">Submit</button>
+                            </div>
+                        </form>
+
+                        <div class="text-center mt-3">
+                            <a href="/" class="text-decoration-none">Back to Login</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/js/account.js"></script>
+</body>
+</html> 
