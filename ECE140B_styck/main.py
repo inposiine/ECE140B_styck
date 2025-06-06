@@ -195,8 +195,9 @@ async def change_password(data: ChangePassword):
 
 @app.post("/api/device-status")
 async def update_device_status(device_status_data: DeviceStatus):
-    print("Got status:", device_status_data.status, "for user_id:", device_status_data.user_id)
     global device_status, current_session_id
+    current_session_id = None
+    print("Got status:", device_status_data.status, "for user_id:", device_status_data.user_id)
     device_status = device_status_data.status
     user_id = device_status_data.user_id
     
@@ -213,7 +214,7 @@ async def update_device_status(device_status_data: DeviceStatus):
             )
             active_session = cursor.fetchone()
             if active_session:
-                current_session_id = active_session['id']
+                current_session_id = active_session[0]
             else:
                 cursor.execute(
                     "INSERT INTO sessions (user_id, start_time) VALUES (%s, NOW())",
@@ -341,9 +342,28 @@ async def get_session_data(session_id: str, user_id: int = Query(...)):
         cursor.close()
         conn.close()
 
+@app.get("/api/steps/{session_id}")
+async def get_steps(session_id: int, user_id: int = Query(...)):
+    conn = get_db_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            "SELECT timestamp, peak_force, duration, accel_profile FROM steps WHERE user_id = %s AND session_id = %s ORDER BY timestamp",
+            (user_id, session_id)
+        )
+        return cursor.fetchall()
+    except Error as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+    finally:
+        cursor.close()
+        conn.close()
+
 # WebSocket connection for real-time data
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    global current_session_id
     await websocket.accept()
     active_connections.append(websocket)
     print(f"New WebSocket connection established: {websocket.client}")
@@ -361,7 +381,6 @@ async def websocket_endpoint(websocket: WebSocket):
                     if conn:
                         cursor = conn.cursor()
                         try:
-                            global current_session_id
                             if not current_session_id:
                                 cursor.execute(
                                     "SELECT id FROM sessions WHERE user_id = %s AND end_time IS NULL ORDER BY start_time DESC LIMIT 1",
@@ -392,6 +411,57 @@ async def websocket_endpoint(websocket: WebSocket):
                 user_id = json_data.get('user_id', 1)
                 # Call the same logic as /api/device-status
                 await update_device_status(DeviceStatus(status=status, user_id=user_id))
+            if json_data.get('type') == 'step':
+                print("[DEBUG] Step data received:", json_data)
+                user_id = json_data.get('user_id', 1)
+                timestamp = datetime.fromtimestamp(json_data.get('timestamp') / 1000.0)
+                peak_force = json_data.get('peak_force')
+                duration = json_data.get('duration')
+                accel_profile = json_data.get('accelProfile')
+                # Find current session
+                conn = get_db_connection()
+                if conn:
+                    cursor = conn.cursor()
+                    try:
+                        if not current_session_id:
+                            cursor.execute(
+                                "SELECT id FROM sessions WHERE user_id = %s AND end_time IS NULL ORDER BY start_time DESC LIMIT 1",
+                                (user_id,)
+                            )
+                            session = cursor.fetchone()
+                            if session:
+                                current_session_id = session[0]
+                        if current_session_id:
+                            print("peak_force:", peak_force, "duration:", duration)
+                            cursor.execute(
+                                "INSERT INTO steps (user_id, session_id, timestamp, peak_force, duration, accel_profile) VALUES (%s, %s, %s, %s, %s, %s)",
+                                (user_id, current_session_id, timestamp, peak_force, duration, accel_profile)
+                            )
+                            conn.commit()
+                            print(f"[DEBUG] Step inserted for session {current_session_id}, user {user_id}")
+                    except Error as e:
+                        print(f"Error storing step data: {e}")
+                        conn.rollback()
+                    finally:
+                        cursor.close()
+                        conn.close()
+            if json_data.get('type') == 'posture_alert':
+                conn = get_db_connection()
+                if conn:
+                    cursor = conn.cursor()
+                    try:
+                        now = datetime.now()
+                        cursor.execute(
+                            "INSERT INTO posture_alerts (user_id, session_id, timestamp, anomaly, value) VALUES (%s, %s, %s, %s, %s)",
+                            (json_data['user_id'], current_session_id, now, json_data['anomaly'], json_data['value'])
+                        )
+                        conn.commit()
+                    except Error as e:
+                        print(f"Error storing posture alert: {e}")
+                        conn.rollback()
+                    finally:
+                        cursor.close()
+                        conn.close()
             for connection in active_connections:
                 if connection != websocket:
                     try:
@@ -423,6 +493,24 @@ async def get_force_data(user_id: int, limit: int = 100):
         return data
     except Error as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.get("/api/posture-alerts/{session_id}")
+async def get_posture_alerts(session_id: int, user_id: int = Query(...)):
+    conn = get_db_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            "SELECT timestamp, anomaly, value FROM posture_alerts WHERE user_id = %s AND session_id = %s ORDER BY timestamp",
+            (user_id, session_id)
+        )
+        return cursor.fetchall()
+    except Error as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
     finally:
         cursor.close()
         conn.close()

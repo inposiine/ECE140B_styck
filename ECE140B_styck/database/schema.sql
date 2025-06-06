@@ -27,6 +27,30 @@ CREATE TABLE IF NOT EXISTS force_measurements (
     FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
 
+DROP TABLE IF EXISTS steps;
+CREATE TABLE IF NOT EXISTS steps (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    session_id INT NOT NULL,
+    timestamp DATETIME NOT NULL,
+    peak_force FLOAT,
+    gait_speed FLOAT,
+    accel_profile FLOAT,
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+
+CREATE TABLE IF NOT EXISTS posture_alerts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    session_id INT NOT NULL,
+    timestamp DATETIME NOT NULL,
+    anomaly VARCHAR(32),
+    value FLOAT,
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+
 -- Add indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_start_time ON sessions(start_time);
@@ -50,3 +74,5 @@ SELECT * FROM sessions ORDER BY start_time DESC LIMIT 5;
 SELECT * FROM force_measurements WHERE session_id = SESSION_ID; 
 
 SELECT * FROM sessions WHERE user_id = 1 ORDER BY start_time DESC LIMIT 5; 
+
+SELECT * FROM steps ORDER BY id DESC LIMIT 10; 

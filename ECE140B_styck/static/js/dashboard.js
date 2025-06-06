@@ -100,6 +100,7 @@ let userWeight = 0; // Default user weight
 let userId = null; // To store user ID
 // const forceThreshold = 0.7; // This was 70%, requirement is 15%
 const forceThresholdPercentage = 0.15; // 15% of user's weight
+let stepChart;
 
 // Function to load user data from localStorage
 function loadUserData() {
@@ -215,7 +216,7 @@ function initChart() {
 
 // Update the chart with new data
 function updateChart(data) {
-    const labels = data.map(point => new Date(point.timestamp).toLocaleTimeString());
+    const labels = data.map(point => new Date(point.timestamp).toLocaleTimeString("en-US", { timeZone: "America/Los_Angeles" }));
     const values = data.map(point => point.force_value);
     
     gaitChart.data.labels = labels;
@@ -244,7 +245,7 @@ function updateChart(data) {
 
 // Helper to get userId from localStorage
 function getUserId() {
-    return localStorage.getItem('userId');
+    return 2;
 }
 
 // Handle device switch
@@ -358,11 +359,49 @@ document.getElementById('sessionSelector').addEventListener('change', async (e) 
     const sessionId = e.target.value;
     if (!sessionId) return;
     const userId = getUserId();
+
+    // Fetch force data (existing)
     const response = await fetch(`/api/session-data/${sessionId}?user_id=${userId}`);
     const data = await response.json();
     currentSessionData = data;
     updateChart(data);
+
+    // Fetch step data (new)
+    const stepResponse = await fetch(`/api/steps/${sessionId}?user_id=${userId}`);
+    const steps = await stepResponse.json();
+    console.log("Fetched steps:", steps);
+    displayGaitMetrics(steps);
+    updateStepChart(steps);
+
+    // Fetch posture alerts (new)
+    const alertResponse = await fetch(`/api/posture-alerts/${sessionId}?user_id=${userId}`);
+    const alerts = await alertResponse.json();
+    console.log("Fetched posture alerts:", alerts);
+    displayPostureAlerts(alerts);
 });
+
+function displayGaitMetrics(steps) {
+    console.log("displayGaitMetrics called with:", steps);
+    // Example: display in a div with id="gaitMetrics"
+    const metricsDiv = document.getElementById('gaitMetrics');
+    if (!steps.length) {
+        metricsDiv.innerHTML = "No step data.";
+        return;
+    }
+    const stepCount = steps.length;
+    const avgGaitSpeed = steps.reduce((a, b) => a + b.gait_speed, 0) / stepCount;
+    const cadence = 60 / (1 / avgGaitSpeed); // Convert gait speed to steps per minute
+    const avgForce = steps.reduce((a, b) => a + b.peak_force, 0) / stepCount;
+    // Gait symmetry: stddev of peak_force or gait_speed
+    const forceStd = Math.sqrt(steps.reduce((a, b) => a + Math.pow(b.peak_force - avgForce, 2), 0) / stepCount);
+    metricsDiv.innerHTML = `
+        <b>Step Count:</b> ${stepCount}<br>
+        <b>Cadence:</b> ${cadence.toFixed(1)} steps/min<br>
+        <b>Avg Gait Speed:</b> ${avgGaitSpeed.toFixed(2)} m/s<br>
+        <b>Avg Peak Force:</b> ${avgForce.toFixed(2)} kg<br>
+        <b>Step Force StdDev (Symmetry):</b> ${forceStd.toFixed(2)} kg
+    `;
+}
 
 // WebSocket connection for real-time data
 let ws;
@@ -389,11 +428,100 @@ function connectWebSocket() {
     };
 }
 
+function initStepChart() {
+    const ctx = document.getElementById('stepChart').getContext('2d');
+    stepChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [
+                {
+                    label: 'Peak Force (kg)',
+                    data: [],
+                    borderColor: 'rgb(255, 99, 132)',
+                    backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                    yAxisID: 'y1',
+                },
+                {
+                    label: 'Gait Speed (m/s)',
+                    data: [],
+                    borderColor: 'rgb(54, 162, 235)',
+                    backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                    yAxisID: 'y2',
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y1: {
+                    type: 'linear',
+                    position: 'left',
+                    title: { display: true, text: 'Peak Force (kg)' }
+                },
+                y2: {
+                    type: 'linear',
+                    position: 'right',
+                    title: { display: true, text: 'Gait Speed (m/s)' },
+                    grid: { drawOnChartArea: false }
+                }
+            }
+        }
+    });
+}
+
+function updateStepChart(steps) {
+    if (!stepChart) return;
+    const labels = steps.map((step, i) => `Step ${i + 1}`);
+    const peakForces = steps.map(step => step.peak_force);
+    const gaitSpeeds = steps.map(step => step.gait_speed);
+
+    stepChart.data.labels = labels;
+    stepChart.data.datasets[0].data = peakForces;
+    stepChart.data.datasets[1].data = gaitSpeeds;
+    stepChart.update();
+
+    console.log("updateStepChart called with:", steps);
+}
+
+function displayPostureAlerts(alerts) {
+    const alertDiv = document.getElementById('postureAlerts');
+    if (!alerts.length) {
+        alertDiv.innerHTML = "No posture anomalies detected.";
+        return;
+    }
+
+    // Group by anomaly type
+    const grouped = {};
+    alerts.forEach(alert => {
+        if (!grouped[alert.anomaly]) grouped[alert.anomaly] = [];
+        grouped[alert.anomaly].push(alert);
+    });
+
+    // Format output
+    let html = '';
+    Object.keys(grouped).forEach(anomaly => {
+        const count = grouped[anomaly].length;
+        html += `<b style="color:red">${anomaly.replace('_', ' ')}:</b> ${count} times<br>`;
+        html += grouped[anomaly].map(alert => {
+            // Convert timestamp to LA time
+            const date = new Date(alert.timestamp);
+            // If your backend returns UTC, convert to LA time:
+            const laTime = date.toLocaleString("en-US", { timeZone: "America/Los_Angeles" });
+            return `<span style="margin-left:1em;font-size:0.95em;">${laTime} (value: ${alert.value})</span>`;
+        }).join('<br>');
+        html += '<br><br>';
+    });
+
+    alertDiv.innerHTML = html;
+}
+
 // Initialize everything when the page loads
 window.onload = () => {
     loadUserData(); // Load user data first
     initChart();
     connectWebSocket();
+    initStepChart();
     
     // Set default date to today
     const today = new Date().toISOString().split('T')[0];
