@@ -1,55 +1,84 @@
-# Smart Walking Stick Suggestion Generator
+# Styck Smart Walking Stick
 
-A Python script that uses Google’s Gemini LLM to provide real-time, data-driven walking tips based on three normalized gait parameters:
-- **Gait Speed** (m/s)
-- **Gait Force** (Newtons)
-- **Step Duration** (seconds)
-
-This README explains how the script works, how to set it up, and how it applies to our smart walking stick startup project.
+A Python-based suggestion generator and end-to-end firmware + dashboard system that turns an ordinary cane into a real-time gait analysis and rehabilitation aid. Styck measures force, speed, and posture on each step, streams data over Wi-Fi, and uses Google’s Gemini LLM to deliver human-friendly walking tips.
 
 ---
 
 ## 📘 Table of Contents
 
-1. [Project Overview](#project-overview)  
-2. [Prerequisites](#prerequisites)  
-3. [Installation](#installation)  
-4. [Calibration Constants](#calibration-constants)  
-5. [How It Works](#how-it-works)  
-   - [1. Simulating or Reading Sensor Data](#1-simulating-or-reading-sensor-data)  
-   - [2. Normalization Functions](#2-normalization-functions)  
-   - [3. Prompt Generation](#3-prompt-generation)  
-   - [4. Calling Gemini](#4-calling-gemini)  
-   - [5. Interpreting the Suggestion](#5-interpreting-the-suggestion)  
-6. [Usage](#usage)  
-7. [Applying to the Startup Project](#applying-to-the-startup-project)  
-   - [Real-World Sensor Integration](#real-world-sensor-integration)  
-   - [Calibrating for Individual Users](#calibrating-for-individual-users)  
-   - [Possible Extensions](#possible-extensions)  
-8. [License & Acknowledgements](#license--acknowledgements)
+1. [Product Overview](#product-overview)  
+2. [Hardware Components](#hardware-components)  
+3. [Network & Firmware Setup](#network-&-firmware-setup)  
+4. [Software Architecture](#software-architecture)  
+5. [Prerequisites & Installation](#prerequisites--installation)  
+6. [Calibration & Normalization](#calibration--normalization)  
+7. [How It Works](#how-it-works)  
+8. [Usage](#usage)  
+9. [Extending Styck](#extending-styck)  
+10. [License & Acknowledgements](#license--acknowledgements)
 
 ---
 
-## Project Overview
+## Product Overview
 
-Our smart walking stick collects three raw sensor readings on each step:
-1. **Gait Speed** (`S_raw`)  
-2. **Gait Force** (`F_raw`)  
-3. **Step Duration** (`D_raw`)  
+Styck is a next-generation smart cane that:
 
-These raw values are normalized according to user-specific calibration constants (e.g., maximum comfortable speed or force, baseline step duration). The normalized values (`S_norm`, `F_norm`, `D_norm`) plus their recent trends are fed into a few-shot prompt. Google’s Gemini LLM processes this prompt and returns a concise, human-friendly suggestion, such as:
-
-> “Your gait speed is lower than usual; watch your footing.”  
-> “You’re walking with high impact—try softening your steps or taking a brief pause.”
-
-This approach lets us offload complex “if-then” logic to the LLM, making it easy to iterate on advice style without rewriting sensor code.
+- Captures **cane-tip force** via an FSR sensor  
+- Tracks **cane orientation** and **gait speed** with an MPU6050 IMU  
+- Streams data over Wi-Fi (ESP32 hotspot or local network) to a multilingual dashboard  
+- Provides instant LED alerts for posture deviations  
+- Uses Gemini LLM to generate personalized walking tips based on normalized gait parameters
 
 ---
 
-## Prerequisites
+## Hardware Components
+
+- **ESP32** development board (Wi-Fi + MCU)  
+- **Force-Sensing Resistor (FSR)** at the cane tip for load measurement  
+- **MPU6050 IMU** in the handle for acceleration & tilt  
+- **LED indicator** for real-time posture alerts  
+- **Pushbutton** for session start/stop  
+- **Li-Ion battery + charger module** for portable power  
+- **3D-printed enclosures** for tip and handle modules
+
+---
+
+## Network & Firmware Setup
+
+1. **ESP32 Hotspot Mode**  
+   - On power-up, Styck creates an open Wi-Fi SSID `Styck-Setup`  
+   - Connect your laptop or phone to `Styck-Setup`  
+2. **Accessing the Dashboard**  
+   - Point your browser to `http://192.168.4.1` (ESP32’s default IP)  
+   - Use the built-in web UI to configure your local Wi-Fi SSID and password  
+3. **Local Network Mode**  
+   - After setup, Styck joins your home/clinic Wi-Fi  
+   - It obtains a LAN IP (check your router’s DHCP list)  
+   - Dashboards and mobile apps connect to `http://<styck-ip>/dashboard`
+
+---
+
+## Software Architecture
+
+- **Firmware (`device_switch.ino`)**  
+  - Reads FSR via `analogRead()` and IMU via I²C  
+  - Packages JSON `{type, user_id, force, accel, gyro, timestamp}`  
+  - Streams over WebSocket to the FastAPI backend  
+
+- **Backend (`main.py`)**  
+  - FastAPI routes for `/api/...` and WebSocket `/ws`  
+  - Stores sessions, force_measurements, steps, alerts in MySQL  
+
+- **Dashboard (`dashboard.js` + `style.css`)**  
+  - Real-time charts (Chart.js) for force vs. time & gait metrics  
+  - Session start/stop, threshold adjustment, multi-language support via i18next  
+
+---
+
+## Prerequisites & Installation
 
 1. **Python 3.8+**  
-2. **Google Gemini API access** (API key with `genai` library enabled)  
-3. **`google-generativeai` Python package**  
-   ```bash
-   pip install google-generativeai
+2. **ESP32 toolchain** (Arduino IDE or PlatformIO)  
+3. **MySQL database** access for backend storage  
+4. **Google Gemini API key** stored in `GEMINI_API_KEY` environment variable  
+
