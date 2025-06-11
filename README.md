@@ -1,6 +1,6 @@
-# Styck Smart Walking Stick
+# Styck
 
-A Python-based suggestion generator and end-to-end firmware + dashboard system that turns an ordinary cane into a real-time gait analysis and rehabilitation aid. Styck measures force, speed, and posture on each step, streams data over Wi-Fi, and uses Google’s Gemini LLM to deliver human-friendly walking tips.
+A Python-based suggestion generator and end-to-end firmware + dashboard system that turns an ordinary cane experience into a real-time gait analysis and rehabilitation aid. Styck measures force, gait speed, and posture on each step, streams data over Wi-Fi, and uses customize threshold and Google’s Gemini LLM to deliver human-friendly walking tips.
 
 ---
 
@@ -78,7 +78,7 @@ Styck is a next-generation smart cane that:
 ## Prerequisites & Installation
 
 1. **Python 3.8+**  
-2. **ESP32 toolchain** (Arduino IDE or PlatformIO)  
+2. **ESP32 toolchain** 
 3. **MySQL database** access for backend storage  
 4. **Google Gemini API key** stored in `GEMINI_API_KEY` environment variable  
 
