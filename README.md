@@ -4,16 +4,15 @@ A Python-based suggestion generator and end-to-end firmware + dashboard system t
 
 ---
 
-## 📘 Table of Contents
+##  Table of Contents
 
 1. [Product Overview](#product-overview)  
 2. [Hardware Components](#hardware-components)  
 3. [Network & Firmware Setup](#network-&-firmware-setup)  
 4. [Software Architecture](#software-architecture)  
 5. [Prerequisites & Installation](#prerequisites--installation)  
-6. [Calibration & Normalization](#calibration--normalization)  
-7. [How It Works](#how-it-works)  
-8. [Usage](#usage)  
+6. [How It Works](#how-it-works)  
+7. [Usage](#usage)  
 
 
 ---
@@ -82,30 +81,12 @@ Styck is a next-generation smart cane that:
 4. **Google Gemini API key** stored in `GEMINI_API_KEY` environment variable
 
 
-## 6. Calibration & Normalization
 
-Styck automatically establishes personal baselines when you first use it—no extra steps required beyond starting a session:
-
-1. **Baseline Capture**  
-   - When you press the session button to **start**, Styck records your raw cane-tip force and IMU data for the first 10–15 steps under your normal walking pace.  
-2. **Internal Threshold Setting**  
-   - Styck computes your comfortable peak force (`F_comfort`) and average gait speed (`S_comfort`) from those initial steps.  
-   - It sets default alert thresholds at a percentage above those values (e.g. 120% of `F_comfort`), which you can fine-tune later in the dashboard.  
-3. **Dynamic Normalization**  
-   - Each new reading is divided by your baseline:  
-     ```python
-     F_norm = F_raw / F_comfort
-     S_norm = S_raw / S_comfort
-     ```  
-   - When any `F_norm` or `S_norm` crosses its threshold, Styck flashes the LED to warn you.
-
----
-
-## 7. How It Works
+##  How It Works
 
 1. **Session Control**  
    - **Start:** Press and release the cane’s pushbutton once. The LED will blink to confirm the session is active.  
-   - **Stop:** Press and hold the button for 2 seconds. The LED will flash rapidly and then turn off, marking the session end.  
+   - **Stop:** Press and release the button again. The LED will then turn off, marking the session end.  
 
 2. **Sensor Sampling**  
    - During an active session, the ESP32 reads the FSR at the tip and the IMU in the handle at ~50 Hz.  
@@ -115,7 +96,7 @@ Styck automatically establishes personal baselines when you first use it—no ex
    - If either metric exceeds your personalized threshold, the LED flashes once every second until you correct your posture or slow down.  
 
 4. **Data Streaming & Storage**  
-   - Each reading (`force`, `accel`, `gyro`, `timestamp`) is sent via Wi-Fi (WebSocket) to the FastAPI backend.  
+   - Each reading (`force`, `gait speed`, `steps`, `timestamp`) is sent via Wi-Fi (WebSocket) to the FastAPI backend.  
    - FastAPI tags data by session and stores it in MySQL for later review.
 
 5. **Dashboard Visualization**  
@@ -124,17 +105,17 @@ Styck automatically establishes personal baselines when you first use it—no ex
 
 ---
 
-## 8. Usage
+##  Usage
 
 1. **Power On & Connect**  
-   - Plug in or power on Styck. It broadcasts `Styck-Setup` as an open Wi-Fi SSID.  
+   - Battery replacement on Styck. It broadcasts `Styck-Setup` as an open Wi-Fi SSID.  
    - Connect your phone or laptop to `Styck-Setup` and open `http://192.168.4.1`.  
    - Enter your local Wi-Fi credentials to join your network.  
 
 2. **Run a Walking Session**  
    - Press the cane button once to start. The LED will flash slowly.  
    - Walk as usual. LED alerts will indicate when to adjust.  
-   - Press and hold the button to end. The LED will flash rapidly then turn off.  
+   - Press the button again to end. The LED wii turn off indicating the session if off.  
 
 3. **Review Your Data**  
    - In your browser, navigate to `http://<styck-ip>/dashboard`.  
@@ -142,6 +123,17 @@ Styck automatically establishes personal baselines when you first use it—no ex
    - Adjust your alert thresholds or export the session report for your therapist.
 
 4. **Generate AI Suggestions**  
-   ```bash
-   python suggestion_generator.py --session YYYY-MM-DD
+- **Data Collection:**  
+  Each walking session is logged with detailed metrics (force, acceleration, steps, and timestamps) through the FastAPI backend into a secure MySQL database.
+
+- **Continuous Model Training:**  
+  Over time, aggregated session data is used to periodically fine-tune the AI model. By learning from historical trends and individual variations in gait, the system enhances its accuracy, delivering more personalized and context-aware walking tips.
+
+- **Real-Time Analysis & Suggestions:**  
+  - When you run the suggestion generator script, the system:
+     1. Retrieves your most recent session data.  
+     2. Analyzes the data against historical trends and personalized parameters.  
+     3. Uses the refined model to generate actionable and human-friendly suggestions tailored to your current performance and improvement areas.
+
+
 
