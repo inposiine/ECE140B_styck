@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, Form, HTTPException, WebSocket, WebSocketDisconnect, Query
+from fastapi import FastAPI, Request, Form, HTTPException, WebSocket, WebSocketDisconnect, Query, Body
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -15,7 +15,9 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
-from fastapi import Body
+import os
+import google.generativeai as genai
+import time
 
 
 app = FastAPI()
@@ -47,7 +49,7 @@ def get_db_connection():
         print(f"Error connecting to MySQL: {e}")
         return None
 
-# In-memory storage (replace with database in production)
+
 device_status = False
 user_weight = 0
 gait_data: Dict[str, List[Dict]] = {}  # date: [session_data]
@@ -57,6 +59,70 @@ active_connections: list[WebSocket] = []
 
 # Track current session id in memory
 current_session_id = None
+
+# Store the threshold in memory (or DB if you want persistence)
+current_force_threshold = 0.15  # Default 15%
+
+# Get Gemini API key from environment variable
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+if not GEMINI_API_KEY:
+    
+    GEMINI_API_KEY = "AIzaSyBwF9_G2ZW4tc2vWRynF0rA_w1vV6TwRrs"
+    print("Warning: GEMINI_API_KEY environment variable not set, using hardcoded key")
+else:
+    print("Gemini API key loaded from environment variable.")
+
+# Calibration constants
+MIN_SPEED = 0.2
+MAX_SPEED = 2.0
+MIN_FORCE = 5.0
+MAX_FORCE = 60.0
+MIN_DURATION = 0.2
+MAX_DURATION = 2.0
+
+# Normalization functions
+
+def normalize_speed(speed):
+    return min(max((speed - MIN_SPEED) / (MAX_SPEED - MIN_SPEED), 0), 1)
+
+def normalize_force(force):
+    return min(max((force - MIN_FORCE) / (MAX_FORCE - MIN_FORCE), 0), 1)
+
+def normalize_duration(duration):
+    return min(max((duration - MIN_DURATION) / (MAX_DURATION - MIN_DURATION), 0), 1)
+
+# Prompt generation
+
+def generate_prompt(latest, prev1, prev2):
+    prompt = f"""
+You are an AI walking assistant. Analyze the following gait data and provide a short, actionable suggestion for the user. Focus on safety, comfort, and improvement. Use simple language.
+
+Latest step:
+- Gait speed: {latest['gait_speed']:.2f} m/s
+- Peak force: {latest['peak_force']:.2f} kg
+- Step duration: {latest['duration']:.2f} s
+
+Previous steps:
+- Step 2: speed={prev1['gait_speed']:.2f}, force={prev1['peak_force']:.2f}, duration={prev1['duration']:.2f}
+- Step 3: speed={prev2['gait_speed']:.2f}, force={prev2['peak_force']:.2f}, duration={prev2['duration']:.2f}
+
+Recent trend:
+- Speed: {latest['gait_speed']:.2f} → {prev1['gait_speed']:.2f} → {prev2['gait_speed']:.2f}
+- Force: {latest['peak_force']:.2f} → {prev1['peak_force']:.2f} → {prev2['peak_force']:.2f}
+- Duration: {latest['duration']:.2f} → {prev1['duration']:.2f} → {prev2['duration']:.2f}
+
+Give a suggestion in 1-2 sentences.
+"""
+    return prompt
+
+# Suggestion function
+
+def get_suggestion(latest, prev1, prev2, api_key):
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel('models/gemini-2.5-flash-preview-05-20')
+    prompt = generate_prompt(latest, prev1, prev2)
+    response = model.generate_content(prompt)
+    return response.text.strip()
 
 class User(BaseModel):
     username: str
@@ -350,7 +416,7 @@ async def get_steps(session_id: int, user_id: int = Query(...)):
     cursor = conn.cursor(dictionary=True)
     try:
         cursor.execute(
-            "SELECT timestamp, peak_force, duration, accel_profile FROM steps WHERE user_id = %s AND session_id = %s ORDER BY timestamp",
+            "SELECT timestamp, peak_force, gait_speed, accel_profile FROM steps WHERE user_id = %s AND session_id = %s ORDER BY timestamp",
             (user_id, session_id)
         )
         return cursor.fetchall()
@@ -416,7 +482,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 user_id = json_data.get('user_id', 1)
                 timestamp = datetime.fromtimestamp(json_data.get('timestamp') / 1000.0)
                 peak_force = json_data.get('peak_force')
-                duration = json_data.get('duration')
+                gait_speed = json_data.get('gait_speed')
                 accel_profile = json_data.get('accelProfile')
                 # Find current session
                 conn = get_db_connection()
@@ -432,10 +498,10 @@ async def websocket_endpoint(websocket: WebSocket):
                             if session:
                                 current_session_id = session[0]
                         if current_session_id:
-                            print("peak_force:", peak_force, "duration:", duration)
+                            print("peak_force:", peak_force, "gait_speed:", gait_speed)
                             cursor.execute(
-                                "INSERT INTO steps (user_id, session_id, timestamp, peak_force, duration, accel_profile) VALUES (%s, %s, %s, %s, %s, %s)",
-                                (user_id, current_session_id, timestamp, peak_force, duration, accel_profile)
+                                "INSERT INTO steps (user_id, session_id, timestamp, peak_force, gait_speed, accel_profile) VALUES (%s, %s, %s, %s, %s, %s)",
+                                (user_id, current_session_id, timestamp, peak_force, gait_speed, accel_profile)
                             )
                             conn.commit()
                             print(f"[DEBUG] Step inserted for session {current_session_id}, user {user_id}")
@@ -514,6 +580,52 @@ async def get_posture_alerts(session_id: int, user_id: int = Query(...)):
     finally:
         cursor.close()
         conn.close()
+
+@app.post("/api/force-threshold")
+async def set_force_threshold(threshold: float = Body(...)):
+    global current_force_threshold
+    current_force_threshold = threshold
+    # Broadcast to all connected ESP32s
+    message = {"type": "set_force_threshold", "threshold": threshold}
+    for connection in active_connections:
+        try:
+            await connection.send_json(message)
+        except Exception as e:
+            print(f"Error sending threshold to websocket {connection.client}: {e}")
+    return {"message": "Threshold updated and sent to device"}
+
+@app.post("/api/suggestion")
+async def get_walking_suggestion(user_id: int = Form(...)):
+    print(f"Received suggestion request for user_id={user_id}")
+    # Fetch the most recent session for the user
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT id FROM sessions WHERE user_id=%s ORDER BY id DESC LIMIT 1", (user_id,))
+    session = cursor.fetchone()
+    if not session:
+        return {"suggestion": "No session found for user."}
+    session_id = session['id']
+    # Fetch the last 3 steps
+    cursor.execute("SELECT * FROM steps WHERE session_id=%s ORDER BY timestamp DESC LIMIT 3", (session_id,))
+    steps = cursor.fetchall()
+    conn.close()
+    if len(steps) < 3:
+        return {"suggestion": "Not enough step data for suggestion."}
+    # Prepare data for AI
+    steps = list(reversed(steps))  # Oldest first
+    for i in range(3):
+        if i == 0:
+            steps[i]['duration'] = (steps[i+1]['timestamp'] - steps[i]['timestamp']).total_seconds()
+        else:
+            steps[i]['duration'] = (steps[i]['timestamp'] - steps[i-1]['timestamp']).total_seconds()
+    api_key = GEMINI_API_KEY
+    if not api_key:
+        return {"suggestion": "Gemini API key not set on server."}
+    try:
+        suggestion = get_suggestion(steps[2], steps[1], steps[0], api_key)
+        return {"suggestion": suggestion}
+    except Exception as e:
+        return {"suggestion": f"Error generating suggestion: {e}"}
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc):
