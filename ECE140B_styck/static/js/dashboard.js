@@ -96,11 +96,11 @@ import("https://unpkg.com/i18next@21.6.16/dist/umd/i18next.min.js").then(() => {
 let currentPosition;
 let gaitChart;
 let currentSessionData = [];
-let userWeight = 0; // Default user weight
+let userWeight = 100; // Default user weight
 let userId = null; // To store user ID
-// const forceThreshold = 0.7; // This was 70%, requirement is 15%
-const forceThresholdPercentage = 0.15; // 15% of user's weight
+let forceThresholdKg = parseFloat(localStorage.getItem('forceThresholdKg')) || 5; // Default 5kg
 let stepChart;
+let currentUserId = 2;
 
 // Function to load user data from localStorage
 function loadUserData() {
@@ -186,12 +186,14 @@ function initChart() {
         type: 'line',
         data: {
             labels: [],
-            datasets: [{
-                label: 'Force (kg)',
-                data: [],
-                borderColor: 'rgb(75, 192, 192)',
-                tension: 0.1
-            }]
+            datasets: [
+                {
+                    label: 'Peak Force (kg)',
+                    data: [],
+                    borderColor: 'rgb(255, 99, 132)',
+                    backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                }
+            ]
         },
         options: {
             responsive: true,
@@ -200,13 +202,13 @@ function initChart() {
                     beginAtZero: true,
                     title: {
                         display: true,
-                        text: 'Force (kg)'
+                        text: 'Peak Force (kg)'
                     }
                 },
                 x: {
                     title: {
                         display: true,
-                        text: 'Time (seconds)'
+                        text: 'Step Index'
                     }
                 }
             }
@@ -215,27 +217,27 @@ function initChart() {
 }
 
 // Update the chart with new data
-function updateChart(data) {
-    const labels = data.map(point => new Date(point.timestamp).toLocaleTimeString("en-US", { timeZone: "America/Los_Angeles" }));
-    const values = data.map(point => point.force_value);
-    
+function updateChart(steps) {
+    // steps is now the step data array
+    const labels = steps.map((step, i) => `Step ${i + 1}`);
+    const peakForces = steps.map(step => step.peak_force);
     gaitChart.data.labels = labels;
-    gaitChart.data.datasets[0].data = values;
+    gaitChart.data.datasets[0].data = peakForces;
     gaitChart.update();
 
     // Check for excessive force (15% of user's weight)
-    const maxForce = values.length > 0 ? Math.max(...values) : 0;
+    const maxForce = peakForces.length > 0 ? Math.max(...peakForces) : 0;
     const forceWarning = document.getElementById('forceWarning');
     const forceNormal = document.getElementById('forceNormal');
     
-    if (userWeight > 0 && maxForce > userWeight * forceThresholdPercentage) {
+    if (userWeight > 0 && maxForce > forceThresholdKg) {
         forceWarning.style.display = 'block';
         forceNormal.style.display = 'none';
-        forceWarning.textContent = `Warning: Force (${maxForce.toFixed(2)} kg) exceeds 15% of your weight (${(userWeight * forceThresholdPercentage).toFixed(2)} kg).`;
+        forceWarning.textContent = `Warning: Force (${maxForce.toFixed(2)} kg) exceeds your set threshold (${forceThresholdKg.toFixed(2)} kg).`;
     } else if (userWeight > 0) {
         forceWarning.style.display = 'none';
         forceNormal.style.display = 'block';
-        forceNormal.textContent = `Force is within safe limits. Threshold: (${(userWeight * forceThresholdPercentage).toFixed(2)} kg).`;
+        forceNormal.textContent = `Force is within safe limits. Threshold: (${forceThresholdKg.toFixed(2)} kg).`;
     } else {
         forceWarning.style.display = 'none';
         forceNormal.style.display = 'block';
@@ -360,18 +362,13 @@ document.getElementById('sessionSelector').addEventListener('change', async (e) 
     if (!sessionId) return;
     const userId = getUserId();
 
-    // Fetch force data (existing)
-    const response = await fetch(`/api/session-data/${sessionId}?user_id=${userId}`);
-    const data = await response.json();
-    currentSessionData = data;
-    updateChart(data);
-
-    // Fetch step data (new)
+    // Fetch step data (for both charts)
     const stepResponse = await fetch(`/api/steps/${sessionId}?user_id=${userId}`);
     const steps = await stepResponse.json();
     console.log("Fetched steps:", steps);
     displayGaitMetrics(steps);
     updateStepChart(steps);
+    updateChart(steps);
 
     // Fetch posture alerts (new)
     const alertResponse = await fetch(`/api/posture-alerts/${sessionId}?user_id=${userId}`);
@@ -436,17 +433,17 @@ function initStepChart() {
             labels: [],
             datasets: [
                 {
-                    label: 'Peak Force (kg)',
-                    data: [],
-                    borderColor: 'rgb(255, 99, 132)',
-                    backgroundColor: 'rgba(255, 99, 132, 0.2)',
-                    yAxisID: 'y1',
-                },
-                {
                     label: 'Gait Speed (m/s)',
                     data: [],
                     borderColor: 'rgb(54, 162, 235)',
                     backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                    yAxisID: 'y1',
+                },
+                {
+                    label: 'Step Duration (s)',
+                    data: [],
+                    borderColor: 'rgb(255, 205, 86)',
+                    backgroundColor: 'rgba(255, 205, 86, 0.2)',
                     yAxisID: 'y2',
                 }
             ]
@@ -457,12 +454,12 @@ function initStepChart() {
                 y1: {
                     type: 'linear',
                     position: 'left',
-                    title: { display: true, text: 'Peak Force (kg)' }
+                    title: { display: true, text: 'Gait Speed (m/s)' }
                 },
                 y2: {
                     type: 'linear',
                     position: 'right',
-                    title: { display: true, text: 'Gait Speed (m/s)' },
+                    title: { display: true, text: 'Step Duration (s)' },
                     grid: { drawOnChartArea: false }
                 }
             }
@@ -473,15 +470,25 @@ function initStepChart() {
 function updateStepChart(steps) {
     if (!stepChart) return;
     const labels = steps.map((step, i) => `Step ${i + 1}`);
-    const peakForces = steps.map(step => step.peak_force);
     const gaitSpeeds = steps.map(step => step.gait_speed);
+    // Calculate step durations (difference in timestamp between steps, in seconds)
+    const stepDurations = steps.map((step, i, arr) => {
+        if (i === 0) return null;
+        const prev = arr[i - 1];
+        return (new Date(step.timestamp) - new Date(prev.timestamp)) / 1000.0;
+    });
+    // Remove the first null value for step durations
+    const durations = stepDurations.slice(1);
+    const durationLabels = labels.slice(1);
+    // Pad the first value to keep arrays aligned
+    const paddedDurations = [null, ...durations];
 
     stepChart.data.labels = labels;
-    stepChart.data.datasets[0].data = peakForces;
-    stepChart.data.datasets[1].data = gaitSpeeds;
+    stepChart.data.datasets[0].data = gaitSpeeds;
+    stepChart.data.datasets[1].data = paddedDurations;
     stepChart.update();
-
     console.log("updateStepChart called with:", steps);
+    console.log("Step durations:", paddedDurations);
 }
 
 function displayPostureAlerts(alerts) {
@@ -533,4 +540,50 @@ window.onload = () => {
     dateSelector.dispatchEvent(new Event('change'));
     
     updateChart(currentSessionData); // Initial chart update (might be empty)
-}; 
+    const input = document.getElementById('forceThresholdInput');
+    if (input) input.value = forceThresholdKg;
+    getAISuggestion();
+
+    // Add event listener for refresh button
+    document.getElementById('refreshSuggestion').addEventListener('click', getAISuggestion);
+};
+
+document.getElementById('updateForceThresholdBtn').addEventListener('click', async () => {
+    const input = document.getElementById('forceThresholdInput');
+    let value = parseFloat(input.value);
+    if (isNaN(value) || value <= 0) {
+        alert("Please enter a valid force threshold in kg.");
+        return;
+    }
+    forceThresholdKg = value;
+    localStorage.setItem('forceThresholdKg', forceThresholdKg);
+    alert(`Force alert threshold updated to ${value} kg.`);
+    updateChart(currentSessionData); // Re-evaluate warnings
+
+    // Send to backend to update device
+    await fetch('/api/force-threshold', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(forceThresholdKg)
+    });
+});
+
+// Function to get AI suggestion
+async function getAISuggestion() {
+    console.log("getAISuggestion called");
+    try {
+        const response = await fetch('/api/suggestion', {
+            method: 'POST',
+            body: new URLSearchParams({ user_id: 2 }),
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        });
+        if (!response.ok) {
+            throw new Error('Failed to get suggestion');
+        }
+        const data = await response.json();
+        document.getElementById('aiSuggestion').textContent = data.suggestion;
+    } catch (error) {
+        console.error('Error getting AI suggestion:', error);
+        document.getElementById('aiSuggestion').textContent = 'Error getting suggestion. Please try again.';
+    }
+} 
